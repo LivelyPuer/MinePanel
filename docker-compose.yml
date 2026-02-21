@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.serverjars
-    image: maks1ms/serverjars:latest
+    image: livelypuer/serverjars:latest
     container_name: serverjars
     restart: unless-stopped
     ports:
@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.panel
-    image: maks1ms/minepanel:latest
+    image: livelypuer/minepanel:latest
     container_name: minepanel
     restart: unless-stopped
     ports:

@@ -24,7 +24,7 @@
 ## Быстрый старт
 
 ```bash
-git clone https://github.com/yourusername/minepanel.git
+git clone https://github.com/livelypuer/minepanel.git
 cd minepanel
 docker compose up -d
 ```
@@ -35,8 +35,8 @@ docker compose up -d
 ## Docker Hub
 
 ```bash
-docker pull yourusername/minepanel:latest
-docker pull yourusername/serverjars:latest
+docker pull livelypuer/minepanel:latest
+docker pull livelypuer/serverjars:latest
 ```
 
 Или используйте `docker-compose.yml` из репозитория.

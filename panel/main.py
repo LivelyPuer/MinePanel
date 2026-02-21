@@ -5,17 +5,20 @@ FastAPI app with REST API and WebSocket console.
 
 import json
 import logging
+import secrets
 import shutil
+import time as _time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import aiohttp
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Cookie, Depends, FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from panel import auth
 from panel import database as db
 from panel import jar_manager
 from panel.console_manager import ConsoleManager
@@ -31,6 +34,10 @@ console_mgr = ConsoleManager()
 server_mgr = ServerManager(console_mgr)
 metrics_collector = MetricsCollector(server_mgr)
 
+# Short-lived WebSocket auth tickets: ticket -> {"user_id": int, "created_at": float}
+_ws_tickets: dict[str, dict] = {}
+WS_TICKET_MAX_AGE = 30  # seconds
+
 
 async def _on_status_change(server_id: str, status: str):
     await db.set_status(server_id, status)
@@ -44,6 +51,7 @@ server_mgr.set_status_callback(_on_status_change)
 async def lifespan(app_instance: FastAPI):
     # Startup
     await db.init()
+    await auth.ensure_default_user()
     # Reset stale "running" statuses from previous unclean shutdown
     await db.reset_running_servers()
     session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
@@ -71,7 +79,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -99,18 +108,168 @@ def _enrich_server(server: dict) -> dict:
     return server
 
 
+# ─── Auth dependency ─────────────────────────────────────────────────────────
+
+async def get_current_user(
+    minepanel_session: str | None = Cookie(default=None, alias="minepanel_session"),
+):
+    """Extract and validate the session cookie. Returns user dict or raises 401."""
+    if not minepanel_session:
+        return None
+    session = auth.get_session(minepanel_session)
+    if not session:
+        return None
+    user = await db.get_user_by_id(session["user_id"])
+    return user
+
+
+async def require_user(user: dict | None = Depends(get_current_user)):
+    """Dependency that requires an authenticated user."""
+    if not user:
+        raise __import__("fastapi").HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def _validate_ws_ticket(ticket: str) -> bool:
+    """Validate and consume a one-time WebSocket ticket."""
+    data = _ws_tickets.pop(ticket, None)
+    if not data:
+        return False
+    if _time.time() - data["created_at"] > WS_TICKET_MAX_AGE:
+        return False
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HEALTH CHECK (no auth)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/health")
+async def health():
+    return JSONResponse({"status": "ok"})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTHENTICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/auth/login")
+async def login(request: Request):
+    body = await request.json()
+    username = body.get("username", "").strip()
+    password = body.get("password", "")
+
+    if not username or not password:
+        return error("Username and password are required")
+
+    user = await db.get_user_by_username(username)
+    if not user or not auth.verify_password(password, user["password_hash"]):
+        return error("Invalid username or password", 401)
+
+    token = auth.create_session(user["id"], user["username"])
+
+    response = JSONResponse({
+        "status": "ok",
+        "data": {
+            "username": user["username"],
+            "must_change_password": bool(user["must_change_password"]),
+        },
+    })
+    response.set_cookie(
+        key="minepanel_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=auth.SESSION_MAX_AGE,
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+async def logout(
+    minepanel_session: str | None = Cookie(default=None, alias="minepanel_session"),
+):
+    if minepanel_session:
+        auth.delete_session(minepanel_session)
+    response = JSONResponse({"status": "ok", "data": {"logged_out": True}})
+    response.delete_cookie("minepanel_session", path="/")
+    return response
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: dict = Depends(require_user)):
+    return ok({
+        "username": user["username"],
+        "must_change_password": bool(user["must_change_password"]),
+    })
+
+
+@app.post("/api/auth/change-credentials")
+async def change_credentials(request: Request, user: dict = Depends(require_user)):
+    body = await request.json()
+    new_username = body.get("username", "").strip()
+    new_password = body.get("password", "")
+    current_password = body.get("current_password", "")
+
+    if not auth.verify_password(current_password, user["password_hash"]):
+        return error("Current password is incorrect", 401)
+
+    if not new_username or len(new_username) < 3:
+        return error("Username must be at least 3 characters")
+    if not new_password or len(new_password) < 6:
+        return error("Password must be at least 6 characters")
+
+    if new_username == auth.DEFAULT_USERNAME and new_password == auth.DEFAULT_PASSWORD:
+        return error("You must change both the username and password from defaults")
+
+    pw_hash = auth.hash_password(new_password)
+    updated_user = await db.update_user_credentials(user["id"], new_username, pw_hash)
+
+    auth.clear_all_sessions()
+    token = auth.create_session(updated_user["id"], updated_user["username"])
+
+    response = JSONResponse({
+        "status": "ok",
+        "data": {
+            "username": updated_user["username"],
+            "must_change_password": False,
+        },
+    })
+    response.set_cookie(
+        key="minepanel_session",
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=auth.SESSION_MAX_AGE,
+        path="/",
+    )
+    return response
+
+
+@app.get("/api/auth/ws-ticket")
+async def ws_ticket(user: dict = Depends(require_user)):
+    """Issue a short-lived one-time ticket for WebSocket authentication."""
+    ticket = secrets.token_urlsafe(24)
+    _ws_tickets[ticket] = {
+        "user_id": user["id"],
+        "created_at": _time.time(),
+    }
+    return ok({"ticket": ticket})
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SERVER CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/servers")
-async def list_servers():
+async def list_servers(user: dict = Depends(require_user)):
     servers = await db.get_servers()
     return ok([_enrich_server(s) for s in servers])
 
 
 @app.get("/api/servers/{server_id}")
-async def get_server(server_id: str):
+async def get_server(server_id: str, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -118,7 +277,7 @@ async def get_server(server_id: str):
 
 
 @app.post("/api/servers")
-async def create_server(request: Request):
+async def create_server(request: Request, user: dict = Depends(require_user)):
     body = await request.json()
 
     required = ["name", "jar_type", "jar_version"]
@@ -175,7 +334,7 @@ async def create_server(request: Request):
 
 
 @app.patch("/api/servers/{server_id}")
-async def update_server(server_id: str, request: Request):
+async def update_server(server_id: str, request: Request, user: dict = Depends(require_user)):
     body = await request.json()
     try:
         server = await db.update_server(server_id, body)
@@ -187,7 +346,7 @@ async def update_server(server_id: str, request: Request):
 
 
 @app.delete("/api/servers/{server_id}")
-async def delete_server(server_id: str):
+async def delete_server(server_id: str, user: dict = Depends(require_user)):
     if server_mgr.is_running(server_id):
         return error("Stop the server before deleting it")
 
@@ -209,7 +368,7 @@ async def delete_server(server_id: str):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/api/servers/{server_id}/start")
-async def start_server(server_id: str):
+async def start_server(server_id: str, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -229,7 +388,7 @@ async def start_server(server_id: str):
 
 
 @app.post("/api/servers/{server_id}/stop")
-async def stop_server(server_id: str):
+async def stop_server(server_id: str, user: dict = Depends(require_user)):
     try:
         await server_mgr.stop(server_id)
     except Exception as e:
@@ -238,7 +397,7 @@ async def stop_server(server_id: str):
 
 
 @app.post("/api/servers/{server_id}/restart")
-async def restart_server(server_id: str):
+async def restart_server(server_id: str, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -250,7 +409,7 @@ async def restart_server(server_id: str):
 
 
 @app.post("/api/servers/{server_id}/command")
-async def send_command(server_id: str, request: Request):
+async def send_command(server_id: str, request: Request, user: dict = Depends(require_user)):
     body = await request.json()
     command = body.get("command", "").strip()
     if not command:
@@ -302,7 +461,7 @@ def _write_properties(original: str, new_props: dict) -> str:
 
 
 @app.get("/api/servers/{server_id}/config")
-async def get_config(server_id: str):
+async def get_config(server_id: str, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -316,7 +475,7 @@ async def get_config(server_id: str):
 
 
 @app.put("/api/servers/{server_id}/config")
-async def update_config(server_id: str, request: Request):
+async def update_config(server_id: str, request: Request, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -364,7 +523,7 @@ def _safe_path(server_id: str, rel_path: str) -> Path:
 
 
 @app.get("/api/servers/{server_id}/files")
-async def list_files(server_id: str, request: Request):
+async def list_files(server_id: str, request: Request, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -391,7 +550,7 @@ async def list_files(server_id: str, request: Request):
 
 
 @app.get("/api/servers/{server_id}/files/read")
-async def read_file(server_id: str, request: Request):
+async def read_file(server_id: str, request: Request, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -420,7 +579,7 @@ async def read_file(server_id: str, request: Request):
 
 
 @app.put("/api/servers/{server_id}/files/write")
-async def write_file(server_id: str, request: Request):
+async def write_file(server_id: str, request: Request, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -450,6 +609,7 @@ async def upload_file(
     server_id: str,
     file: UploadFile = File(...),
     path: str = Form(default="."),
+    user: dict = Depends(require_user),
 ):
     server = await db.get_server(server_id)
     if not server:
@@ -484,7 +644,7 @@ async def upload_file(
 
 
 @app.post("/api/servers/{server_id}/files/mkdir")
-async def mkdir_file(server_id: str, request: Request):
+async def mkdir_file(server_id: str, request: Request, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -504,7 +664,7 @@ async def mkdir_file(server_id: str, request: Request):
 
 
 @app.delete("/api/servers/{server_id}/files")
-async def delete_file(server_id: str, request: Request):
+async def delete_file(server_id: str, request: Request, user: dict = Depends(require_user)):
     server = await db.get_server(server_id)
     if not server:
         return error("Server not found", 404)
@@ -538,13 +698,13 @@ async def delete_file(server_id: str, request: Request):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/jars/types")
-async def get_jar_types():
+async def get_jar_types(user: dict = Depends(require_user)):
     types = await jar_manager.get_types()
     return ok(types)
 
 
 @app.get("/api/jars/versions/{jar_type}")
-async def get_jar_versions(jar_type: str):
+async def get_jar_versions(jar_type: str, user: dict = Depends(require_user)):
     versions = await jar_manager.get_versions(jar_type)
     return ok(versions)
 
@@ -555,6 +715,12 @@ async def get_jar_versions(jar_type: str):
 
 @app.websocket("/ws/console/{server_id}")
 async def ws_console(websocket: WebSocket, server_id: str):
+    # Authenticate via one-time ticket
+    ticket = websocket.query_params.get("ticket")
+    if not ticket or not _validate_ws_ticket(ticket):
+        await websocket.close(code=4001, reason="Authentication required")
+        return
+
     server = await db.get_server(server_id)
     if not server:
         await websocket.close(code=4004, reason="Server not found")
@@ -591,19 +757,17 @@ async def ws_console(websocket: WebSocket, server_id: str):
 # ANALYTICS / METRICS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-import time as _time
-
 _PERIOD_SECONDS = {"1h": 3600, "6h": 6 * 3600, "24h": 24 * 3600}
 
 
 @app.get("/api/analytics/system")
-async def analytics_system():
+async def analytics_system(user: dict = Depends(require_user)):
     """Current live system metrics."""
     return ok(metrics_collector.get_system_snapshot())
 
 
 @app.get("/api/analytics/servers")
-async def analytics_servers():
+async def analytics_servers(user: dict = Depends(require_user)):
     """Current live metrics for all running servers."""
     snapshots = metrics_collector.get_all_server_snapshots()
     for snap in snapshots:
@@ -616,7 +780,7 @@ async def analytics_servers():
 
 
 @app.get("/api/analytics/history")
-async def analytics_system_history(period: str = "1h"):
+async def analytics_system_history(period: str = "1h", user: dict = Depends(require_user)):
     """Historical system metrics for the given period."""
     seconds = _PERIOD_SECONDS.get(period, 3600)
     since = _time.time() - seconds
@@ -625,7 +789,7 @@ async def analytics_system_history(period: str = "1h"):
 
 
 @app.get("/api/analytics/servers/{server_id}/history")
-async def analytics_server_history(server_id: str, period: str = "1h"):
+async def analytics_server_history(server_id: str, period: str = "1h", user: dict = Depends(require_user)):
     """Historical metrics for a specific server."""
     server = await db.get_server(server_id)
     if not server:

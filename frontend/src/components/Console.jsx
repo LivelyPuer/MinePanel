@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { wsURL } from '../api'
+import { wsURL, getWsTicket } from '../api'
 
 export default function Console({ serverId }) {
   const termRef = useRef(null)
@@ -42,38 +42,51 @@ export default function Console({ serverId }) {
 
     terminal.writeln('\x1b[90m[MinePanel] Connecting to console...\x1b[0m')
 
-    // WebSocket connection
-    const ws = new WebSocket(wsURL(`/ws/console/${serverId}`))
-    wsRef.current = ws
+    let ws = null
+    let cancelled = false
 
-    ws.onopen = () => {
-      terminal.writeln('\x1b[32m[MinePanel] Connected\x1b[0m')
-    }
+    const connect = async () => {
+      try {
+        const { ticket } = await getWsTicket()
+        if (cancelled) return
+        ws = new WebSocket(wsURL(`/ws/console/${serverId}`, ticket))
+        wsRef.current = ws
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data)
-      if (msg.type === 'log') {
-        terminal.writeln(msg.line)
-      } else if (msg.type === 'status') {
-        const color = msg.status === 'running' ? '32' : msg.status === 'crashed' ? '31' : '90'
-        terminal.writeln(`\x1b[${color}m[MinePanel] Server ${msg.status}\x1b[0m`)
+        ws.onopen = () => {
+          terminal.writeln('\x1b[32m[MinePanel] Connected\x1b[0m')
+        }
+
+        ws.onmessage = (event) => {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'log') {
+            terminal.writeln(msg.line)
+          } else if (msg.type === 'status') {
+            const color = msg.status === 'running' ? '32' : msg.status === 'crashed' ? '31' : '90'
+            terminal.writeln(`\x1b[${color}m[MinePanel] Server ${msg.status}\x1b[0m`)
+          }
+        }
+
+        ws.onclose = () => {
+          terminal.writeln('\x1b[90m[MinePanel] Disconnected\x1b[0m')
+        }
+
+        ws.onerror = () => {
+          terminal.writeln('\x1b[31m[MinePanel] Connection error\x1b[0m')
+        }
+      } catch (err) {
+        terminal.writeln('\x1b[31m[MinePanel] Authentication failed\x1b[0m')
       }
     }
 
-    ws.onclose = () => {
-      terminal.writeln('\x1b[90m[MinePanel] Disconnected\x1b[0m')
-    }
-
-    ws.onerror = () => {
-      terminal.writeln('\x1b[31m[MinePanel] Connection error\x1b[0m')
-    }
+    connect()
 
     const handleResize = () => fitAddon.fit()
     window.addEventListener('resize', handleResize)
 
     return () => {
+      cancelled = true
       window.removeEventListener('resize', handleResize)
-      ws.close()
+      if (ws) ws.close()
       terminal.dispose()
     }
   }, [serverId])

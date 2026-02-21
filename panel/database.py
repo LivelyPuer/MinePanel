@@ -58,6 +58,15 @@ async def init():
     await _db.execute(
         "CREATE INDEX IF NOT EXISTS idx_metrics_server_ts ON metrics(server_id, timestamp)"
     )
+    await _db.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            username            TEXT NOT NULL UNIQUE,
+            password_hash       TEXT NOT NULL,
+            must_change_password INTEGER DEFAULT 1,
+            created_at          TEXT DEFAULT (datetime('now'))
+        )
+    """)
     await _db.commit()
 
 
@@ -239,3 +248,45 @@ async def delete_metrics_before(cutoff: float):
     """Delete metrics rows older than the cutoff timestamp."""
     await _db.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff,))
     await _db.commit()
+
+
+# ─── Users ──────────────────────────────────────────────────────────────
+
+async def get_user_by_username(username: str) -> dict | None:
+    async with _db.execute(
+        "SELECT * FROM users WHERE username = ?", (username,)
+    ) as cur:
+        row = await cur.fetchone()
+    return _row_to_dict(row) if row else None
+
+
+async def get_user_by_id(user_id: int) -> dict | None:
+    async with _db.execute(
+        "SELECT * FROM users WHERE id = ?", (user_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    return _row_to_dict(row) if row else None
+
+
+async def user_count() -> int:
+    async with _db.execute("SELECT COUNT(*) FROM users") as cur:
+        row = await cur.fetchone()
+    return row[0]
+
+
+async def create_user(username: str, password_hash: str, must_change: bool = True) -> dict:
+    await _db.execute(
+        "INSERT INTO users (username, password_hash, must_change_password) VALUES (?, ?, ?)",
+        (username, password_hash, 1 if must_change else 0),
+    )
+    await _db.commit()
+    return await get_user_by_username(username)
+
+
+async def update_user_credentials(user_id: int, username: str, password_hash: str) -> dict:
+    await _db.execute(
+        "UPDATE users SET username = ?, password_hash = ?, must_change_password = 0 WHERE id = ?",
+        (username, password_hash, user_id),
+    )
+    await _db.commit()
+    return await get_user_by_id(user_id)

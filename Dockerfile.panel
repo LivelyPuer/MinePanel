@@ -24,6 +24,6 @@ EXPOSE 8585
 EXPOSE 25565-25600
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-    CMD curl -f http://localhost:8585/api/servers || exit 1
+    CMD curl -f http://localhost:8585/api/health || exit 1
 
 CMD ["uvicorn", "panel.main:app", "--host", "0.0.0.0", "--port", "8585"]

@@ -64,6 +64,31 @@ body {
   letter-spacing: -0.3px;
 }
 
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.nav-icon-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: var(--text-dim);
+  transition: all 0.2s;
+}
+
+.nav-icon-link:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
 .main-content {
   max-width: 1200px;
   margin: 0 auto;

@@ -21,25 +21,162 @@
 | **modded** | fabric, forge, neoforge, mohist |
 | **proxies** | velocity, waterfall, bungeecord |
 
-## Быстрый старт
+## Развертывание
+
+### Способ 1: Docker Compose (рекомендуется)
+
+Создайте файл `docker-compose.yml` на сервере и вставьте в него:
+
+```yaml
+services:
+  serverjars:
+    image: livelypuer/serverjars:latest
+    container_name: serverjars
+    restart: unless-stopped
+    ports:
+      - "8580:8080"
+    volumes:
+      - serverjars_cache:/data/cache
+    environment:
+      - CACHE_TTL=3600
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  panel:
+    image: livelypuer/minepanel:latest
+    container_name: minepanel
+    restart: unless-stopped
+    ports:
+      - "8585:8585"
+      - "25565-25600:25565-25600"
+    volumes:
+      - panel_data:/data
+    environment:
+      - SERVERJARS_URL=http://serverjars:8080
+      - JAVA_PATH=java
+      - DATA_DIR=/data
+      - MC_PORT_MIN=25565
+      - MC_PORT_MAX=25600
+    depends_on:
+      - serverjars
+
+volumes:
+  serverjars_cache:
+  panel_data:
+```
+
+Запустите:
 
 ```bash
-git clone https://github.com/livelypuer/minepanel.git
-cd minepanel
 docker compose up -d
 ```
+
+Для остановки:
+
+```bash
+docker compose down
+```
+
+Для обновления до последней версии:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+> **Опционально:** если вам нужен GitHub токен для обхода rate limits при скачивании JAR-файлов, создайте файл `.env` рядом с `docker-compose.yml`:
+> ```
+> GITHUB_TOKEN=ghp_your_token_here
+> ```
+
+---
+
+### Способ 2: Docker (без Compose)
+
+Если вы не используете Docker Compose, контейнеры можно запустить вручную.
+
+**1. Создайте сеть для связи между контейнерами:**
+
+```bash
+docker network create minepanel
+```
+
+**2. Создайте тома для хранения данных:**
+
+```bash
+docker volume create serverjars_cache
+docker volume create panel_data
+```
+
+**3. Запустите ServerJars API:**
+
+```bash
+docker run -d \
+  --name serverjars \
+  --network minepanel \
+  --restart unless-stopped \
+  -p 8580:8080 \
+  -v serverjars_cache:/data/cache \
+  -e CACHE_TTL=3600 \
+  livelypuer/serverjars:latest
+```
+
+**4. Запустите MinePanel:**
+
+```bash
+docker run -d \
+  --name minepanel \
+  --network minepanel \
+  --restart unless-stopped \
+  -p 8585:8585 \
+  -p 25565-25600:25565-25600 \
+  -v panel_data:/data \
+  -e SERVERJARS_URL=http://serverjars:8080 \
+  -e JAVA_PATH=java \
+  -e DATA_DIR=/data \
+  -e MC_PORT_MIN=25565 \
+  -e MC_PORT_MAX=25600 \
+  livelypuer/minepanel:latest
+```
+
+Для остановки и удаления:
+
+```bash
+docker stop minepanel serverjars
+docker rm minepanel serverjars
+```
+
+Для обновления:
+
+```bash
+docker pull livelypuer/minepanel:latest
+docker pull livelypuer/serverjars:latest
+docker stop minepanel serverjars
+docker rm minepanel serverjars
+# Повторите команды запуска из шагов 3 и 4
+```
+
+---
+
+### Доступ
+
+После запуска (любым способом):
 
 - **Панель управления:** http://localhost:8585
 - **ServerJars API:** http://localhost:8580
 
-## Docker Hub
+### Docker Hub
+
+Образы доступны на Docker Hub:
 
 ```bash
 docker pull livelypuer/minepanel:latest
 docker pull livelypuer/serverjars:latest
 ```
-
-Или используйте `docker-compose.yml` из репозитория.
 
 ## Архитектура
 

@@ -1,0 +1,29 @@
+FROM node:22-slim AS frontend
+WORKDIR /build
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl openjdk-21-jre-headless && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements-panel.txt .
+RUN pip install --no-cache-dir -r requirements-panel.txt
+
+COPY panel/ ./panel/
+COPY --from=frontend /panel/static ./panel/static/
+
+RUN mkdir -p /data/servers
+
+EXPOSE 8585
+EXPOSE 25565-25600
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
+    CMD curl -f http://localhost:8585/api/servers || exit 1
+
+CMD ["uvicorn", "panel.main:app", "--host", "0.0.0.0", "--port", "8585"]

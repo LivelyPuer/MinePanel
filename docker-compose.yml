@@ -1,0 +1,45 @@
+services:
+  serverjars:
+    build:
+      context: .
+      dockerfile: Dockerfile.serverjars
+    image: maks1ms/serverjars:latest
+    container_name: serverjars
+    restart: unless-stopped
+    ports:
+      - "8580:8080"
+    volumes:
+      - serverjars_cache:/data/cache
+    environment:
+      - CACHE_TTL=3600
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile.panel
+    image: maks1ms/minepanel:latest
+    container_name: minepanel
+    restart: unless-stopped
+    ports:
+      - "8585:8585"
+      - "25565-25600:25565-25600"
+    volumes:
+      - panel_data:/data
+    environment:
+      - SERVERJARS_URL=http://serverjars:8080
+      - JAVA_PATH=java
+      - DATA_DIR=/data
+      - MC_PORT_MIN=25565
+      - MC_PORT_MAX=25600
+    depends_on:
+      - serverjars
+
+volumes:
+  serverjars_cache:
+  panel_data:

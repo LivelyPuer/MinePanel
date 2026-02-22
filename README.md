@@ -1,33 +1,55 @@
 <div align="center">
+
 <img src="https://github.com/LivelyPuer/MinePanel/blob/main/frontend/public/logo-title.png?raw=true" width="180" height="180" alt="MinePanel Logo">
+
 # MinePanel
 
-Панель управления Minecraft серверами + агрегатор JAR-файлов из официальных источников.
+**Панель управления Minecraft серверами + агрегатор JAR-файлов из официальных источников**
 
-## Возможности
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/livelypuer/minepanel)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 
-- Создание и управление Minecraft серверами через веб-интерфейс
-- Консоль сервера в реальном времени (WebSocket)
-- Файловый менеджер и редактор конфигураций
-- Аналитика ресурсов: CPU, RAM, диск (система + каждый сервер)
-- Графики исторической нагрузки (1ч / 6ч / 24ч)
-- Встроенный агрегатор JAR-файлов (замена serverjars.com)
-- 16 типов серверов из 4 категорий
+[Возможности](#-возможности) · [Быстрый старт](#-быстрый-старт) · [Конфигурация](#-конфигурация) · [API](#-api) · [Архитектура](#-архитектура)
 
-## Поддерживаемые серверы
+</div>
+
+---
+
+## ✨ Возможности
+
+🖥️ **Управление серверами** — создание, запуск, остановка через веб-интерфейс
+
+💬 **Консоль реального времени** — WebSocket-подключение к консоли сервера
+
+📁 **Файловый менеджер** — редактирование конфигураций прямо из браузера
+
+📊 **Аналитика ресурсов** — CPU, RAM, диск (система + каждый сервер отдельно)
+
+📈 **Графики нагрузки** — историческая статистика за 1ч / 6ч / 24ч
+
+🧩 **Агрегатор JAR-файлов** — встроенная замена serverjars.com, 16 типов из 4 категорий
+
+---
+
+## 🎮 Поддерживаемые серверы
 
 | Категория | Типы |
-|-----------|------|
-| **vanilla** | vanilla, snapshot |
-| **servers** | paper, purpur, spigot, folia, pufferfish, leaves, sponge |
-| **modded** | fabric, forge, neoforge, mohist |
-| **proxies** | velocity, waterfall, bungeecord |
+|:---------:|------|
+| 🟢 **Vanilla** | `vanilla` · `snapshot` |
+| ⚡ **Servers** | `paper` · `purpur` · `spigot` · `folia` · `pufferfish` · `leaves` · `sponge` |
+| 🔧 **Modded** | `fabric` · `forge` · `neoforge` · `mohist` |
+| 🌐 **Proxies** | `velocity` · `waterfall` · `bungeecord` |
 
-## Развертывание
+---
 
-### Способ 1: Docker Compose (рекомендуется)
+## 🚀 Быстрый старт
 
-Создайте файл `docker-compose.yml` на сервере и вставьте в него:
+### Docker Compose (рекомендуется)
+
+Создайте `docker-compose.yml`:
 
 ```yaml
 services:
@@ -71,50 +93,45 @@ volumes:
   panel_data:
 ```
 
-Запустите:
-
 ```bash
+# Запуск
 docker compose up -d
-```
 
-Для остановки:
-
-```bash
+# Остановка
 docker compose down
+
+# Обновление
+docker compose pull && docker compose up -d
 ```
 
-Для обновления до последней версии:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-> **Опционально:** если вам нужен GitHub токен для обхода rate limits при скачивании JAR-файлов, создайте файл `.env` рядом с `docker-compose.yml`:
+> 💡 **GitHub Token (опционально):** для обхода rate limits создайте `.env` рядом с `docker-compose.yml`:
 > ```
 > GITHUB_TOKEN=ghp_your_token_here
 > ```
 
+### После запуска
+
+| Сервис | URL |
+|:------:|:---:|
+| 🖥️ Панель управления | [`http://localhost:8585`](http://localhost:8585) |
+| 📦 ServerJars API | [`http://localhost:8580`](http://localhost:8580) |
+
 ---
 
-### Способ 2: Docker (без Compose)
+<details>
+<summary>📦 <b>Ручной запуск через Docker (без Compose)</b></summary>
 
-Если вы не используете Docker Compose, контейнеры можно запустить вручную.
+<br>
 
-**1. Создайте сеть для связи между контейнерами:**
+**1. Сеть и тома:**
 
 ```bash
 docker network create minepanel
-```
-
-**2. Создайте тома для хранения данных:**
-
-```bash
 docker volume create serverjars_cache
 docker volume create panel_data
 ```
 
-**3. Запустите ServerJars API:**
+**2. ServerJars API:**
 
 ```bash
 docker run -d \
@@ -127,7 +144,7 @@ docker run -d \
   livelypuer/serverjars:latest
 ```
 
-**4. Запустите MinePanel:**
+**3. MinePanel:**
 
 ```bash
 docker run -d \
@@ -145,63 +162,26 @@ docker run -d \
   livelypuer/minepanel:latest
 ```
 
-Для остановки и удаления:
+**Остановка / удаление / обновление:**
 
 ```bash
-docker stop minepanel serverjars
-docker rm minepanel serverjars
-```
+docker stop minepanel serverjars && docker rm minepanel serverjars
 
-Для обновления:
-
-```bash
+# Обновление — pull + повторный запуск
 docker pull livelypuer/minepanel:latest
 docker pull livelypuer/serverjars:latest
-docker stop minepanel serverjars
-docker rm minepanel serverjars
-# Повторите команды запуска из шагов 3 и 4
 ```
+
+</details>
 
 ---
 
-### Доступ
-
-После запуска (любым способом):
-
-- **Панель управления:** http://localhost:8585
-- **ServerJars API:** http://localhost:8580
-
-### Docker Hub
-
-Образы доступны на Docker Hub:
-
-```bash
-docker pull livelypuer/minepanel:latest
-docker pull livelypuer/serverjars:latest
-```
-
-## Архитектура
-
-Проект состоит из двух сервисов:
-
-| Сервис | Порт | Описание |
-|--------|------|----------|
-| **panel** | 8585 | Панель управления (FastAPI + React) |
-| **serverjars** | 8580 | API агрегатор JAR-файлов |
-
-### Стек технологий
-
-- **Backend:** Python 3.12, FastAPI, SQLite, psutil
-- **Frontend:** React 19, Vite, Recharts
-- **Runtime:** OpenJDK 21 (для Minecraft серверов)
-- **Инфраструктура:** Docker, Docker Compose
-
-## Конфигурация
+## ⚙️ Конфигурация
 
 ### Panel
 
 | Переменная | По умолчанию | Описание |
-|------------|-------------|----------|
+|:----------:|:------------:|----------|
 | `SERVERJARS_URL` | `http://serverjars:8080` | URL ServerJars API |
 | `DATA_DIR` | `/data` | Директория данных |
 | `JAVA_PATH` | `java` | Путь к Java |
@@ -211,51 +191,101 @@ docker pull livelypuer/serverjars:latest
 ### ServerJars API
 
 | Переменная | По умолчанию | Описание |
-|------------|-------------|----------|
-| `CACHE_TTL` | `3600` | Время жизни кеша (секунды) |
-| `GITHUB_TOKEN` | — | GitHub токен (опционально, для rate limits) |
+|:----------:|:------------:|----------|
+| `CACHE_TTL` | `3600` | Время жизни кеша (сек) |
+| `GITHUB_TOKEN` | — | GitHub токен для rate limits |
 
-## ServerJars API
+---
 
-Полностью совместим с форматом serverjars.com:
+## 📡 API
 
-```
-GET /api/fetchTypes                  — все категории и типы
-GET /api/fetchAll/{type}             — все версии
-GET /api/fetchLatest/{type}          — последняя версия
-GET /api/fetchJar/{type}/{version}   — скачать JAR (302 redirect)
-GET /api/typeInfo/{type}             — информация о типе
-GET /api/stats                       — статистика API
-```
+### ServerJars API
 
-## Panel API
+Полностью совместим с форматом serverjars.com.
 
 ```
-GET    /api/servers                  — список серверов
-POST   /api/servers                  — создать сервер
-POST   /api/servers/:id/start       — запустить
-POST   /api/servers/:id/stop        — остановить
-GET    /api/analytics/system         — метрики системы
-GET    /api/analytics/servers        — метрики серверов
-GET    /api/analytics/history        — история нагрузки
-WS     /ws/console/:id              — консоль (WebSocket)
+GET  /api/fetchTypes                  — все категории и типы
+GET  /api/fetchAll/{type}             — все версии типа
+GET  /api/fetchLatest/{type}          — последняя версия
+GET  /api/fetchJar/{type}/{version}   — скачать JAR (302 redirect)
+GET  /api/typeInfo/{type}             — информация о типе
+GET  /api/stats                       — статистика API
 ```
 
-## Источники данных
+### Panel API
 
-Все JAR-файлы загружаются из официальных источников:
+```
+GET    /api/servers                   — список серверов
+POST   /api/servers                   — создать сервер
+POST   /api/servers/:id/start        — запустить
+POST   /api/servers/:id/stop         — остановить
+GET    /api/analytics/system          — метрики системы
+GET    /api/analytics/servers         — метрики серверов
+GET    /api/analytics/history         — история нагрузки
+WS     /ws/console/:id               — консоль (WebSocket)
+```
 
-- **Mojang** — vanilla, snapshot
-- **PaperMC API** — paper, folia, velocity, waterfall
-- **PurpurMC API** — purpur
-- **FabricMC Meta** — fabric
-- **MinecraftForge Maven** — forge
-- **NeoForged Maven** — neoforge
-- **MohistMC API** — mohist
-- **GitHub Releases** — pufferfish, leaves
-- **SpigotMC / md-5 CI** — spigot, bungeecord
-- **SpongePowered** — sponge
+---
 
-## Лицензия
+## 🏗️ Архитектура
 
-MIT License. См. [LICENSE](LICENSE).
+```
+┌─────────────────────────────────────────────┐
+│                  Docker Host                 │
+│                                             │
+│  ┌──────────────┐    ┌──────────────────┐   │
+│  │  ServerJars   │◄───│    MinePanel      │   │
+│  │   :8580       │    │     :8585         │   │
+│  │               │    │                   │   │
+│  │  JAR агрегатор│    │  FastAPI + React  │   │
+│  └──────────────┘    │  SQLite + psutil  │   │
+│                       │                   │   │
+│                       │  ┌─────────────┐  │   │
+│                       │  │ MC Servers   │  │   │
+│                       │  │ :25565-25600 │  │   │
+│                       │  └─────────────┘  │   │
+│                       └──────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+### Стек технологий
+
+| Слой | Технологии |
+|:----:|------------|
+| **Backend** | Python 3.12 · FastAPI · SQLite · psutil |
+| **Frontend** | React 19 · Vite · Recharts |
+| **Runtime** | OpenJDK 21 |
+| **Infra** | Docker · Docker Compose |
+
+---
+
+## 📥 Источники данных
+
+Все JAR-файлы загружаются исключительно из официальных источников:
+
+| Источник | Типы серверов |
+|----------|--------------|
+| **Mojang** | vanilla, snapshot |
+| **PaperMC API** | paper, folia, velocity, waterfall |
+| **PurpurMC API** | purpur |
+| **FabricMC Meta** | fabric |
+| **MinecraftForge Maven** | forge |
+| **NeoForged Maven** | neoforge |
+| **MohistMC API** | mohist |
+| **GitHub Releases** | pufferfish, leaves |
+| **SpigotMC / md-5 CI** | spigot, bungeecord |
+| **SpongePowered** | sponge |
+
+---
+
+## 📄 Лицензия
+
+Распространяется под лицензией [MIT](LICENSE).
+
+---
+
+<div align="center">
+
+**[⬆ Наверх](#minepanel)**
+
+</div>

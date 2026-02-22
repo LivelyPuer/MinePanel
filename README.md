@@ -1,3 +1,5 @@
+<div align="center">
+<img src="https://github.com/LivelyPuer/MinePanel/blob/main/frontend/public/logo-title.png?raw=true" width="180" height="180" alt="MinePanel Logo">
 # MinePanel
 
 Панель управления Minecraft серверами + агрегатор JAR-файлов из официальных источников.
